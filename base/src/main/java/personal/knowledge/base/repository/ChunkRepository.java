@@ -9,6 +9,8 @@ import personal.knowledge.base.domain.DocumentChunk;
 
 public interface ChunkRepository extends JpaRepository<DocumentChunk, UUID> {
 
+    List<DocumentChunk> findByDocument_IdOrderByChunkIndex(UUID documentId);
+
     /**
      * Retrieves the chunks most similar to the given query embedding, ordered by
      * ascending cosine distance ({@code <=>}), i.e. most relevant first.

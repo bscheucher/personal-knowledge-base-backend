@@ -2,7 +2,7 @@ spring:
   application:
     name: base
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/knowledgebase}
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/knowledgebase}
     username: ${DB_USER:kb}
     password: ${DB_PASSWORD:kb}
   jpa:
