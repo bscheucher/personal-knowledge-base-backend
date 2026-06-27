@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: base
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/knowledgebase}
+    username: ${DB_USER:kb}
+    password: ${DB_PASSWORD:kb}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      embedding:
+        options:
+          model: text-embedding-3-small
+      chat:
+        options:
+          model: gpt-4o-mini
+    vectorstore:
+      pgvector:
+        initialize-schema: false
+        dimensions: 1536
+        distance-type: COSINE_DISTANCE
+
+logging:
+  level:
+    personal.knowledge.base: DEBUG
