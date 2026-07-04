@@ -28,7 +28,10 @@ spring:
         initialize-schema: false
         dimensions: 1536
         distance-type: COSINE_DISTANCE
-
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
 logging:
   level:
     personal.knowledge.base: DEBUG
