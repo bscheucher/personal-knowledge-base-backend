@@ -11,9 +11,13 @@ public interface ChunkRepository extends JpaRepository<DocumentChunk, UUID> {
 
     List<DocumentChunk> findByDocument_IdOrderByChunkIndex(UUID documentId);
 
+    void deleteByDocument_Id(UUID documentId);
+
     /**
      * Retrieves the chunks most similar to the given query embedding, ordered by
-     * ascending cosine distance ({@code <=>}), i.e. most relevant first.
+     * ascending cosine distance ({@code <=>}), i.e. most relevant first. The no-op addition keeps
+     * this query exact: an approximate IVFFlat scan applies joins as post-filters and can otherwise
+     * return fewer than {@code limit} READY chunks, including no rows at all.
      *
      * @param embedding the query vector in pgvector literal form, e.g. {@code [0.1,0.2,...]}
      * @param limit     maximum number of chunks to return
@@ -21,8 +25,10 @@ public interface ChunkRepository extends JpaRepository<DocumentChunk, UUID> {
     @Query(
             value =
                     """
-                    SELECT * FROM document_chunk
-                    ORDER BY embedding <=> CAST(:embedding AS vector)
+                    SELECT chunk.* FROM document_chunk chunk
+                    JOIN document doc ON doc.id = chunk.document_id
+                    WHERE doc.status = 'READY'
+                    ORDER BY (chunk.embedding <=> CAST(:embedding AS vector)) + 0
                     LIMIT :limit
                     """,
             nativeQuery = true)

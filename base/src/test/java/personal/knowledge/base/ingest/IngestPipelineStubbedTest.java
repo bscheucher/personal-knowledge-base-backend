@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import java.util.Random;
+import java.util.ArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.embedding.Embedding;
@@ -33,12 +34,14 @@ class IngestPipelineStubbedTest {
     @Autowired private DocumentRepository documentRepository;
 
     private Document ingested;
+    private final List<Document> additionalDocuments = new ArrayList<>();
 
     @AfterEach
     void cleanup() {
         if (ingested != null) {
             documentRepository.deleteById(ingested.getId());
         }
+        additionalDocuments.forEach(document -> documentRepository.deleteById(document.getId()));
     }
 
     @Test
@@ -75,6 +78,50 @@ class IngestPipelineStubbedTest {
 
         assertThat(nearest).isNotEmpty();
         assertThat(nearest.get(0).getContent()).isEqualTo(target.getContent());
+    }
+
+    @Test
+    void retrievalReturnsChunksFromReadyDocumentsOnly() {
+        float[] embedding = StubEmbeddingConfig.deterministicVector("same query");
+        for (DocumentStatus status : DocumentStatus.values()) {
+            Document document =
+                    documentRepository.save(
+                            Document.builder()
+                                    .title(status.name())
+                                    .sourceType(personal.knowledge.base.domain.SourceType.TEXT)
+                                    .status(status)
+                                    .build());
+            additionalDocuments.add(document);
+            chunkRepository.save(
+                    DocumentChunk.builder()
+                            .document(document)
+                            .chunkIndex(0)
+                            .content(status.name())
+                            .embedding(embedding)
+                            .build());
+        }
+
+        List<DocumentChunk> nearest = chunkRepository.findNearest(embedding, 10);
+
+        assertThat(nearest).extracting(DocumentChunk::getContent).contains("READY");
+        assertThat(nearest).extracting(DocumentChunk::getContent)
+                .doesNotContain("PENDING", "PROCESSING", "ERROR");
+    }
+
+    @Test
+    void persistsBoundedFailureReasonFromMigration() {
+        Document failed =
+                documentRepository.saveAndFlush(
+                        Document.builder()
+                                .title("Failed")
+                                .sourceType(personal.knowledge.base.domain.SourceType.TEXT)
+                                .status(DocumentStatus.ERROR)
+                                .failureReason("Safe failure reason")
+                                .build());
+        additionalDocuments.add(failed);
+
+        assertThat(documentRepository.findById(failed.getId()).orElseThrow().getFailureReason())
+                .isEqualTo("Safe failure reason");
     }
 
     @TestConfiguration

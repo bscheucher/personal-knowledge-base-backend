@@ -1,20 +1,17 @@
 package personal.knowledge.base.ingest;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import personal.knowledge.base.domain.Document;
-import personal.knowledge.base.domain.DocumentChunk;
-import personal.knowledge.base.domain.DocumentStatus;
 import personal.knowledge.base.domain.SourceType;
-import personal.knowledge.base.repository.ChunkRepository;
-import personal.knowledge.base.repository.DocumentRepository;
 
 /**
  * Orchestrates the ingest pipeline: text extraction → chunking → embedding → storage.
@@ -27,75 +24,82 @@ import personal.knowledge.base.repository.DocumentRepository;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@EnableConfigurationProperties(IngestProperties.class)
 public class IngestService {
 
-    private final DocumentRepository documentRepository;
-    private final ChunkRepository chunkRepository;
     private final ChunkingService chunkingService;
     private final EmbeddingService embeddingService;
     private final UrlFetchingService urlFetchingService;
+    private final IngestLifecycleService lifecycleService;
+    private final IngestProperties properties;
 
     /** Ingests raw text directly. */
     public Document ingestText(String title, String text) {
-        return ingest(title, SourceType.TEXT, text);
+        return ingest(title, SourceType.TEXT, () -> text);
     }
 
     /** Securely fetches a URL, extracts its visible text, and ingests it. */
     public Document ingestUrl(String url) {
-        UrlFetchingService.FetchedPage page = urlFetchingService.fetch(url);
-        return ingest(page.uri().toString(), SourceType.URL, page.text());
+        return ingest(url, SourceType.URL, () -> urlFetchingService.fetch(url).text());
     }
 
     /** Extracts text from a PDF with PDFBox and ingests it. */
     public Document ingestPdf(String filename, byte[] bytes) {
-        String text;
+        return ingest(filename, SourceType.PDF, () -> extractPdf(filename, bytes));
+    }
+
+    private String extractPdf(String filename, byte[] bytes) {
         try (PDDocument pdf = Loader.loadPDF(bytes)) {
-            text = new PDFTextStripper().getText(pdf);
+            return new PDFTextStripper().getText(pdf);
         } catch (IOException e) {
             throw new IngestException("Failed to parse PDF: " + filename, e);
         }
-        return ingest(filename, SourceType.PDF, text);
     }
 
-    private Document ingest(String title, SourceType sourceType, String rawText) {
-        Document document =
-                documentRepository.save(
-                        Document.builder()
-                                .title(title)
-                                .sourceType(sourceType)
-                                .status(DocumentStatus.PENDING)
-                                .build());
+    private Document ingest(String title, SourceType sourceType, Supplier<String> extractor) {
+        Document document = lifecycleService.createPending(title, sourceType);
         try {
-            document.setStatus(DocumentStatus.PROCESSING);
-            documentRepository.save(document);
+            lifecycleService.markProcessing(document.getId());
 
+            String rawText = extractor.get();
             List<String> contents = chunkingService.chunk(rawText);
             if (contents.isEmpty()) {
                 throw new IngestException("No text content extracted from: " + title);
             }
 
             List<float[]> embeddings = embeddingService.embed(contents);
-            List<DocumentChunk> chunks = new ArrayList<>(contents.size());
-            for (int i = 0; i < contents.size(); i++) {
-                chunks.add(
-                        DocumentChunk.builder()
-                                .document(document)
-                                .chunkIndex(i)
-                                .content(contents.get(i))
-                                .embedding(embeddings.get(i))
-                                .build());
-            }
-            chunkRepository.saveAll(chunks);
+            validateEmbeddings(contents, embeddings);
 
-            document.setStatus(DocumentStatus.READY);
-            Document ready = documentRepository.save(document);
-            log.info("Ingested document {} ({}) with {} chunks", ready.getId(), title, chunks.size());
+            Document ready = lifecycleService.complete(document.getId(), contents, embeddings);
+            log.info("Ingested document {} ({}) with {} chunks", ready.getId(), title, contents.size());
             return ready;
         } catch (Exception e) {
             log.error("Ingest failed for document {} ({})", document.getId(), title, e);
-            document.setStatus(DocumentStatus.ERROR);
-            documentRepository.save(document);
-            throw (e instanceof IngestException ie) ? ie : new IngestException("Ingest failed: " + title, e);
+            lifecycleService.fail(document.getId(), safeFailureReason(e));
+            throw (e instanceof IngestException ie)
+                    ? ie
+                    : new IngestException("Document ingestion failed", e);
         }
+    }
+
+    private void validateEmbeddings(List<String> contents, List<float[]> embeddings) {
+        if (embeddings == null || embeddings.size() != contents.size()) {
+            throw new IngestException("Embedding service returned an invalid result count");
+        }
+        int expectedDimensions = properties.getEmbeddingDimensions();
+        for (float[] embedding : embeddings) {
+            if (embedding == null || embedding.length != expectedDimensions) {
+                throw new IngestException("Embedding service returned an invalid vector dimension");
+            }
+        }
+    }
+
+    private String safeFailureReason(Exception failure) {
+        String reason =
+                failure instanceof IngestException && failure.getMessage() != null
+                        ? failure.getMessage()
+                        : "Document processing failed";
+        int maxLength = properties.getMaxFailureReasonLength();
+        return reason.length() <= maxLength ? reason : reason.substring(0, maxLength);
     }
 }

@@ -12,6 +12,7 @@ public record DocumentResponse(
         String title,
         SourceType sourceType,
         DocumentStatus status,
+        String failureReason,
         OffsetDateTime createdAt) {
 
     public static DocumentResponse from(Document document) {
@@ -20,6 +21,7 @@ public record DocumentResponse(
                 document.getTitle(),
                 document.getSourceType(),
                 document.getStatus(),
+                document.getFailureReason(),
                 document.getCreatedAt());
     }
 }

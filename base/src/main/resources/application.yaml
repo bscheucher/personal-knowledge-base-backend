@@ -36,6 +36,10 @@ logging:
   level:
     personal.knowledge.base: DEBUG
 app:
+  ingest:
+    embedding-dimensions: 1536
+    max-failure-reason-length: 500
+    stale-after: 30m
   url-fetch:
     connect-timeout: 5s
     read-timeout: 10s

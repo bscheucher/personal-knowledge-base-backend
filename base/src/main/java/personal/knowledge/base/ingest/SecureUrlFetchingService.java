@@ -26,6 +26,7 @@ import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.util.Timeout;
 import org.jsoup.Jsoup;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 
@@ -41,6 +42,7 @@ public class SecureUrlFetchingService implements UrlFetchingService {
     private final UrlFetchProperties properties;
     private final HostResolver hostResolver;
 
+    @Autowired
     public SecureUrlFetchingService(UrlFetchProperties properties) {
         this(properties, InetAddress::getAllByName);
     }

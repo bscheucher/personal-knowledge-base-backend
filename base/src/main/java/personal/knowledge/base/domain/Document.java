@@ -40,6 +40,9 @@ public class Document {
     @Column(nullable = false)
     private DocumentStatus status;
 
+    @Column(name = "failure_reason", length = 500)
+    private String failureReason;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
