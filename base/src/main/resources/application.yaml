@@ -35,3 +35,10 @@ spring:
 logging:
   level:
     personal.knowledge.base: DEBUG
+app:
+  url-fetch:
+    connect-timeout: 5s
+    read-timeout: 10s
+    max-response-size: 2MB
+    max-redirects: 5
+    user-agent: personal-knowledge-base/1.0

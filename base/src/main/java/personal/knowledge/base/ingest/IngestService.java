@@ -8,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
-import org.jsoup.Jsoup;
 import org.springframework.stereotype.Service;
 import personal.knowledge.base.domain.Document;
 import personal.knowledge.base.domain.DocumentChunk;
@@ -34,21 +33,17 @@ public class IngestService {
     private final ChunkRepository chunkRepository;
     private final ChunkingService chunkingService;
     private final EmbeddingService embeddingService;
+    private final UrlFetchingService urlFetchingService;
 
     /** Ingests raw text directly. */
     public Document ingestText(String title, String text) {
         return ingest(title, SourceType.TEXT, text);
     }
 
-    /** Fetches a URL, extracts its visible text with Jsoup, and ingests it. */
+    /** Securely fetches a URL, extracts its visible text, and ingests it. */
     public Document ingestUrl(String url) {
-        String text;
-        try {
-            text = Jsoup.connect(url).get().body().text();
-        } catch (IOException e) {
-            throw new IngestException("Failed to fetch URL: " + url, e);
-        }
-        return ingest(url, SourceType.URL, text);
+        UrlFetchingService.FetchedPage page = urlFetchingService.fetch(url);
+        return ingest(page.uri().toString(), SourceType.URL, page.text());
     }
 
     /** Extracts text from a PDF with PDFBox and ingests it. */

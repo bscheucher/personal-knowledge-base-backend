@@ -69,13 +69,14 @@ class DocumentControllerTest {
     @Test
     void ingestUrlFailureMapsToUnprocessableEntity() throws Exception {
         given(ingestService.ingestUrl(any()))
-                .willThrow(new IngestException("Failed to fetch URL: http://x"));
+                .willThrow(new IngestException("The URL could not be fetched safely"));
 
         mockMvc.perform(
                         post("/api/documents/url")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"url\":\"http://x\"}"))
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.detail").value("The URL could not be fetched safely"));
     }
 
     @Test
