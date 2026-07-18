@@ -5,6 +5,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import personal.knowledge.base.document.DocumentNotFoundException;
+import personal.knowledge.base.chat.ChatException;
 import personal.knowledge.base.ingest.IngestException;
 
 @RestControllerAdvice
@@ -18,5 +19,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IngestException.class)
     public ProblemDetail handleIngestFailure(IngestException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
+    @ExceptionHandler(ChatException.class)
+    public ProblemDetail handleChatFailure(ChatException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 }

@@ -37,19 +37,24 @@ public class ChatService {
 
     /** Answers a question, streaming the response token by token. */
     public Flux<String> answer(String question) {
-        float[] questionEmbedding = embeddingService.embed(question);
-        List<DocumentChunk> chunks = chunkRepository.findNearest(questionEmbedding, TOP_K);
+        try {
+            float[] questionEmbedding = embeddingService.embed(question);
+            List<DocumentChunk> chunks = chunkRepository.findNearest(questionEmbedding, TOP_K);
 
-        if (chunks.isEmpty()) {
-            log.debug("No chunks available for question: {}", question);
+            if (chunks.isEmpty()) {
+                log.debug("No chunks available for question: {}", question);
+            }
+
+            String context =
+                    chunks.stream()
+                            .map(DocumentChunk::getContent)
+                            .collect(Collectors.joining("\n\n---\n\n"));
+            String systemPrompt = SYSTEM_PROMPT_TEMPLATE.formatted(context);
+
+            return llmClient.stream(systemPrompt, question);
+        } catch (Exception failure) {
+            log.error("Unable to start chat answer", failure);
+            throw new ChatException("The answer could not be started", failure);
         }
-
-        String context =
-                chunks.stream()
-                        .map(DocumentChunk::getContent)
-                        .collect(Collectors.joining("\n\n---\n\n"));
-        String systemPrompt = SYSTEM_PROMPT_TEMPLATE.formatted(context);
-
-        return llmClient.stream(systemPrompt, question);
     }
 }

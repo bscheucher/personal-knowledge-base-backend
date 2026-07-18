@@ -1,5 +1,31 @@
 # Chat streaming — debugging findings & fixes
 
+## Current SSE contract
+
+`GET /api/chat/stream?question=...` returns `text/event-stream`. Every payload is JSON so token
+whitespace and Unicode are data rather than SSE framing:
+
+```text
+event:token
+data:{"text":" leading-space token"}
+
+event:done
+data:{"status":"complete"}
+```
+
+The terminal event is exactly one of:
+
+- `done` with `{"status":"complete"}` after successful completion.
+- `error` with `{"status":"interrupted","message":"The answer stream was interrupted"}` after
+  an asynchronous failure. No `done` follows an error.
+
+Failures while embedding or retrieving context occur before SSE starts and return an RFC 9457
+problem detail with HTTP `502`. Blank questions and questions longer than 4,000 characters return
+HTTP `400`. Client cancellation cancels the upstream model publisher and emits no terminal event.
+
+Responses include `Cache-Control: no-store`, `X-Accel-Buffering: no`, and
+`X-Content-Type-Options: nosniff`.
+
 _Investigated 2026-06-30. Covers the SSE chat pipeline spanning the backend
 (`base_backend`) and the React frontend (`base_frontend`)._
 
