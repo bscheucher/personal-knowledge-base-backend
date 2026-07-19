@@ -113,16 +113,22 @@ curl --no-buffer -G http://localhost:8080/api/chat/stream \
 ## Testing
 
 ```bash
-# Full suite (requires the pgvector container running)
+# Fast unit and web tests; no Docker, database, or API key required
 ./gradlew test
 
+# Integration tests; Testcontainers starts PostgreSQL/pgvector and Flyway runs automatically
+./gradlew integrationTest
+
+# Both default suites
+./gradlew check
+
 # Run only the OpenAI-backed end-to-end test (needs a funded key)
-OPENAI_API_KEY=$(cat .openai_key) ./gradlew test --tests '*IngestServiceIntegrationTest'
+OPENAI_API_KEY=$(cat .openai_key) ./gradlew liveOpenAiTest
 ```
 
-The stubbed integration tests use deterministic fake AI models, so they exercise the full
-ingest/retrieval pipeline against real pgvector **without an API key**. The real OpenAI test is
-gated by the `OPENAI_API_KEY` environment variable and is skipped when it is absent.
+The container-backed integration tests use deterministic fake AI models, create isolated test
+data, and exercise the full ingest/retrieval pipeline without an API key or manually prepared
+database. The live suite is separate, gated by `OPENAI_API_KEY`, and never runs as part of `check`.
 
 ---
 

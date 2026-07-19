@@ -21,13 +21,14 @@ import personal.knowledge.base.domain.DocumentChunk;
 import personal.knowledge.base.domain.DocumentStatus;
 import personal.knowledge.base.repository.ChunkRepository;
 import personal.knowledge.base.repository.DocumentRepository;
+import personal.knowledge.base.support.PgVectorContainerTest;
 
 /**
  * Exercises the full ingest + retrieval pipeline against the real pgvector database using a
  * deterministic stub {@link EmbeddingModel}, so no OpenAI key or network access is required.
  */
 @SpringBootTest(properties = "spring.ai.openai.api-key=test")
-class IngestPipelineStubbedTest {
+class IngestPipelineStubbedTest extends PgVectorContainerTest {
 
     @Autowired private IngestService ingestService;
     @Autowired private ChunkRepository chunkRepository;

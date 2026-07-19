@@ -24,6 +24,7 @@ import org.springframework.context.annotation.Primary;
 import personal.knowledge.base.domain.Document;
 import personal.knowledge.base.ingest.IngestService;
 import personal.knowledge.base.repository.DocumentRepository;
+import personal.knowledge.base.support.PgVectorContainerTest;
 import reactor.core.publisher.Flux;
 
 /**
@@ -32,7 +33,7 @@ import reactor.core.publisher.Flux;
  * required.
  */
 @SpringBootTest(properties = "spring.ai.openai.api-key=test")
-class ChatPipelineStubbedTest {
+class ChatPipelineStubbedTest extends PgVectorContainerTest {
 
     @Autowired private IngestService ingestService;
     @Autowired private ChatService chatService;

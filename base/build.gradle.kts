@@ -38,6 +38,8 @@ dependencies {
 	annotationProcessor("org.projectlombok:lombok")
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("io.projectreactor:reactor-test")
+	testImplementation("org.testcontainers:junit-jupiter")
+	testImplementation("org.testcontainers:postgresql")
 	testCompileOnly("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	testAnnotationProcessor("org.projectlombok:lombok")
@@ -49,6 +51,36 @@ dependencyManagement {
 	}
 }
 
-tasks.withType<Test> {
-	useJUnitPlatform()
+tasks.test {
+	description = "Runs the fast unit and web tests."
+	useJUnitPlatform {
+		excludeTags("integration", "live-openai")
+	}
+}
+
+val integrationTest by tasks.registering(Test::class) {
+	description = "Runs container-backed integration tests with PostgreSQL and pgvector."
+	group = LifecycleBasePlugin.VERIFICATION_GROUP
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("integration")
+		excludeTags("live-openai")
+	}
+	shouldRunAfter(tasks.test)
+}
+
+val liveOpenAiTest by tasks.registering(Test::class) {
+	description = "Runs optional tests that call the live OpenAI API."
+	group = LifecycleBasePlugin.VERIFICATION_GROUP
+	testClassesDirs = sourceSets.test.get().output.classesDirs
+	classpath = sourceSets.test.get().runtimeClasspath
+	useJUnitPlatform {
+		includeTags("live-openai")
+	}
+	shouldRunAfter(integrationTest)
+}
+
+tasks.check {
+	dependsOn(integrationTest)
 }
