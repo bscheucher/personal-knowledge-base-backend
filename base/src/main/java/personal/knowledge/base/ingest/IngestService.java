@@ -112,7 +112,7 @@ public class IngestService {
     }
 
     private Duration backoff(int attempt) {
-        int exponent = Math.min(Math.max(attempt - 1, 0), 20);
+        int exponent = Math.clamp(attempt - 1, 0, 20);
         Duration delay = jobProperties.getRetryInitialDelay().multipliedBy(1L << exponent);
         Duration cap = jobProperties.getRetryMaxDelay();
         return delay.compareTo(cap) > 0 ? cap : delay;
