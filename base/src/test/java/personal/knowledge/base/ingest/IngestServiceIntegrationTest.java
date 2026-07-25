@@ -1,7 +1,9 @@
 package personal.knowledge.base.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +27,7 @@ import personal.knowledge.base.support.PgVectorContainerTest;
 @EnabledIfEnvironmentVariable(named = "OPENAI_API_KEY", matches = ".+")
 class IngestServiceIntegrationTest extends PgVectorContainerTest {
 
-    @Autowired private IngestService ingestService;
+    @Autowired private IngestJobService ingestJobService;
     @Autowired private ChunkRepository chunkRepository;
     @Autowired private DocumentRepository documentRepository;
 
@@ -44,7 +46,15 @@ class IngestServiceIntegrationTest extends PgVectorContainerTest {
                 "Spring AI provides building blocks for retrieval-augmented generation. "
                         .repeat(40);
 
-        ingested = ingestService.ingestText("Spring AI overview", text);
+        Document pending = ingestJobService.submitText("Spring AI overview", text);
+        await().atMost(Duration.ofSeconds(30))
+                .until(
+                        () ->
+                                documentRepository
+                                        .findById(pending.getId())
+                                        .map(d -> d.getStatus() != DocumentStatus.PENDING && d.getStatus() != DocumentStatus.PROCESSING)
+                                        .orElse(false));
+        ingested = documentRepository.findById(pending.getId()).orElseThrow();
 
         assertThat(ingested.getStatus()).isEqualTo(DocumentStatus.READY);
 

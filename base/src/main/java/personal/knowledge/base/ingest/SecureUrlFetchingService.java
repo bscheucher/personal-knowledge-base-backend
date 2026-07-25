@@ -214,7 +214,12 @@ public class SecureUrlFetchingService implements UrlFetchingService {
     }
 
     private IngestException safeFailure(Throwable cause) {
-        return cause == null ? new IngestException(SAFE_ERROR) : new IngestException(SAFE_ERROR, cause);
+        // Network-level failures (timeouts, connection errors, DNS lookup failures) are transient
+        // and worth retrying; explicit validation rejections (SSRF block, bad content type, empty
+        // body — cause == null, or an IllegalArgumentException from a malformed redirect target)
+        // are deterministic and will fail again on retry.
+        boolean retryable = cause instanceof IOException || cause instanceof UnknownHostException;
+        return new IngestException(SAFE_ERROR, cause, retryable);
     }
 
     @FunctionalInterface

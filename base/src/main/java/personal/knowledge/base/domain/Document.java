@@ -15,6 +15,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "document")
@@ -43,7 +46,23 @@ public class Document {
     @Column(name = "failure_reason", length = 500)
     private String failureReason;
 
+    /** Raw bytes to (re)process: UTF-8 text, UTF-8 URL, or a PDF file. Cleared on terminal outcome. */
+    @JdbcTypeCode(SqlTypes.VARBINARY)
+    @Column(name = "source_payload")
+    private byte[] sourcePayload;
+
+    @Column(name = "attempt_count", nullable = false)
+    @Builder.Default
+    private int attemptCount = 0;
+
+    @Column(name = "next_attempt_at")
+    private OffsetDateTime nextAttemptAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
 }

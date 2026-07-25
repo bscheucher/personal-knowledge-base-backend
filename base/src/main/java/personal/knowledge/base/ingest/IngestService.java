@@ -1,8 +1,11 @@
 package personal.knowledge.base.ingest;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -11,15 +14,16 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import personal.knowledge.base.domain.Document;
-import personal.knowledge.base.domain.SourceType;
+import personal.knowledge.base.repository.DocumentRepository;
 
 /**
- * Orchestrates the ingest pipeline: text extraction → chunking → embedding → storage.
+ * Runs the ingest pipeline for a single claimed document: text extraction → chunking →
+ * embedding → storage.
  *
- * <p>Runs synchronously and drives the document through its status lifecycle
- * ({@code PENDING → PROCESSING → READY}, or {@code ERROR} on failure). Status writes are
- * intentionally committed independently of the body so that an {@code ERROR} state
- * survives a failed embedding or parse.
+ * <p>Called by the background executor ({@link IngestJobService}) for one document at a time.
+ * Drives the document through its status lifecycle ({@code PENDING → PROCESSING → READY}, or
+ * back to {@code PENDING} with a backoff delay for a retryable failure, or {@code ERROR} once
+ * attempts are exhausted or the failure is deterministic).
  */
 @Service
 @RequiredArgsConstructor
@@ -31,21 +35,52 @@ public class IngestService {
     private final EmbeddingService embeddingService;
     private final UrlFetchingService urlFetchingService;
     private final IngestLifecycleService lifecycleService;
+    private final DocumentRepository documentRepository;
     private final IngestProperties properties;
+    private final IngestJobProperties jobProperties;
 
-    /** Ingests raw text directly. */
-    public Document ingestText(String title, String text) {
-        return ingest(title, SourceType.TEXT, () -> text);
+    /** Processes one PENDING document: claim, extract, chunk, embed, and persist the outcome. */
+    public void process(UUID documentId) {
+        if (!lifecycleService.claim(documentId)) {
+            return;
+        }
+        Document document = documentRepository.findById(documentId).orElse(null);
+        if (document == null) {
+            log.debug("Document {} was deleted right after being claimed", documentId);
+            return;
+        }
+        try {
+            String rawText = extract(document);
+            List<String> contents = chunkingService.chunk(rawText);
+            if (contents.isEmpty()) {
+                throw new IngestException("No text content extracted from: " + document.getTitle());
+            }
+
+            List<float[]> embeddings = embeddingService.embed(contents);
+            validateEmbeddings(contents, embeddings);
+
+            lifecycleService
+                    .complete(documentId, contents, embeddings)
+                    .ifPresentOrElse(
+                            ready ->
+                                    log.info(
+                                            "Ingested document {} ({}) with {} chunks",
+                                            ready.getId(),
+                                            ready.getTitle(),
+                                            contents.size()),
+                            () -> log.debug("Document {} was deleted before ingestion completed", documentId));
+        } catch (Exception e) {
+            handleFailure(document, e);
+        }
     }
 
-    /** Securely fetches a URL, extracts its visible text, and ingests it. */
-    public Document ingestUrl(String url) {
-        return ingest(url, SourceType.URL, () -> urlFetchingService.fetch(url).text());
-    }
-
-    /** Extracts text from a PDF with PDFBox and ingests it. */
-    public Document ingestPdf(String filename, byte[] bytes) {
-        return ingest(filename, SourceType.PDF, () -> extractPdf(filename, bytes));
+    private String extract(Document document) {
+        byte[] payload = document.getSourcePayload();
+        return switch (document.getSourceType()) {
+            case TEXT -> new String(payload, StandardCharsets.UTF_8);
+            case URL -> urlFetchingService.fetch(new String(payload, StandardCharsets.UTF_8)).text();
+            case PDF -> extractPdf(document.getTitle(), payload);
+        };
     }
 
     private String extractPdf(String filename, byte[] bytes) {
@@ -56,30 +91,31 @@ public class IngestService {
         }
     }
 
-    private Document ingest(String title, SourceType sourceType, Supplier<String> extractor) {
-        Document document = lifecycleService.createPending(title, sourceType);
-        try {
-            lifecycleService.markProcessing(document.getId());
-
-            String rawText = extractor.get();
-            List<String> contents = chunkingService.chunk(rawText);
-            if (contents.isEmpty()) {
-                throw new IngestException("No text content extracted from: " + title);
-            }
-
-            List<float[]> embeddings = embeddingService.embed(contents);
-            validateEmbeddings(contents, embeddings);
-
-            Document ready = lifecycleService.complete(document.getId(), contents, embeddings);
-            log.info("Ingested document {} ({}) with {} chunks", ready.getId(), title, contents.size());
-            return ready;
-        } catch (Exception e) {
-            log.error("Ingest failed for document {} ({})", document.getId(), title, e);
-            lifecycleService.fail(document.getId(), safeFailureReason(e));
-            throw (e instanceof IngestException ie)
-                    ? ie
-                    : new IngestException("Document ingestion failed", e);
+    private void handleFailure(Document document, Exception e) {
+        UUID documentId = document.getId();
+        boolean retryable = !(e instanceof IngestException ie) || ie.isRetryable();
+        int attempt = document.getAttemptCount();
+        if (retryable && attempt < jobProperties.getMaxAttempts()) {
+            Duration delay = backoff(attempt);
+            log.warn(
+                    "Ingest attempt {} failed for document {} ({}); retrying in {}",
+                    attempt,
+                    documentId,
+                    document.getTitle(),
+                    delay,
+                    e);
+            lifecycleService.retryLater(documentId, OffsetDateTime.now().plus(delay), safeFailureReason(e));
+        } else {
+            log.error("Ingest failed for document {} ({})", documentId, document.getTitle(), e);
+            lifecycleService.fail(documentId, safeFailureReason(e));
         }
+    }
+
+    private Duration backoff(int attempt) {
+        int exponent = Math.min(Math.max(attempt - 1, 0), 20);
+        Duration delay = jobProperties.getRetryInitialDelay().multipliedBy(1L << exponent);
+        Duration cap = jobProperties.getRetryMaxDelay();
+        return delay.compareTo(cap) > 0 ? cap : delay;
     }
 
     private void validateEmbeddings(List<String> contents, List<float[]> embeddings) {

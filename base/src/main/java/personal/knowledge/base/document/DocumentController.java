@@ -7,6 +7,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +23,7 @@ import personal.knowledge.base.document.dto.TextIngestRequest;
 import personal.knowledge.base.document.dto.UrlIngestRequest;
 import personal.knowledge.base.domain.Document;
 import personal.knowledge.base.ingest.IngestException;
-import personal.knowledge.base.ingest.IngestService;
+import personal.knowledge.base.ingest.IngestJobService;
 import personal.knowledge.base.repository.DocumentRepository;
 
 @RestController
@@ -30,12 +31,12 @@ import personal.knowledge.base.repository.DocumentRepository;
 @RequiredArgsConstructor
 public class DocumentController {
 
-    private final IngestService ingestService;
+    private final IngestJobService ingestJobService;
     private final DocumentRepository documentRepository;
 
-    /** Uploads and ingests a PDF file. */
+    /** Accepts a PDF file and queues it for background ingestion. */
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public DocumentResponse upload(@RequestParam("file") MultipartFile file) {
+    public ResponseEntity<DocumentResponse> upload(@RequestParam("file") MultipartFile file) {
         if (file.isEmpty()) {
             throw new IngestException("Uploaded file is empty");
         }
@@ -47,23 +48,27 @@ public class DocumentController {
         } catch (IOException e) {
             throw new IngestException("Failed to read uploaded file: " + filename, e);
         }
-        return DocumentResponse.from(ingestService.ingestPdf(filename, bytes));
+        return accepted(ingestJobService.submitPdf(filename, bytes));
     }
 
-    /** Ingests a document from a URL. */
+    /** Accepts a URL and queues it for background ingestion. */
     @PostMapping("/url")
-    public DocumentResponse ingestUrl(@Valid @RequestBody UrlIngestRequest request) {
-        return DocumentResponse.from(ingestService.ingestUrl(request.url()));
+    public ResponseEntity<DocumentResponse> ingestUrl(@Valid @RequestBody UrlIngestRequest request) {
+        return accepted(ingestJobService.submitUrl(request.url()));
     }
 
-    /** Ingests raw text. */
+    /** Accepts raw text and queues it for background ingestion. */
     @PostMapping("/text")
-    public DocumentResponse ingestText(@Valid @RequestBody TextIngestRequest request) {
+    public ResponseEntity<DocumentResponse> ingestText(@Valid @RequestBody TextIngestRequest request) {
         String title =
                 (request.title() == null || request.title().isBlank())
                         ? "Untitled text"
                         : request.title();
-        return DocumentResponse.from(ingestService.ingestText(title, request.text()));
+        return accepted(ingestJobService.submitText(title, request.text()));
+    }
+
+    private ResponseEntity<DocumentResponse> accepted(Document document) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(DocumentResponse.from(document));
     }
 
     /** Lists all documents, newest first. */

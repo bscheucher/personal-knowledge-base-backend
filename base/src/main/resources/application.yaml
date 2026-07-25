@@ -39,7 +39,15 @@ app:
   ingest:
     embedding-dimensions: 1536
     max-failure-reason-length: 500
-    stale-after: 30m
+  ingest-jobs:
+    core-pool-size: 2
+    max-pool-size: 4
+    queue-capacity: 50
+    dispatch-batch-size: 20
+    dispatch-interval: 5s
+    max-attempts: 3
+    retry-initial-delay: 5s
+    retry-max-delay: 2m
   url-fetch:
     connect-timeout: 5s
     read-timeout: 10s

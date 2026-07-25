@@ -1,7 +1,9 @@
 package personal.knowledge.base.chat;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import org.junit.jupiter.api.AfterEach;
@@ -22,7 +24,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import personal.knowledge.base.domain.Document;
-import personal.knowledge.base.ingest.IngestService;
+import personal.knowledge.base.domain.DocumentStatus;
+import personal.knowledge.base.ingest.IngestJobService;
 import personal.knowledge.base.repository.DocumentRepository;
 import personal.knowledge.base.support.PgVectorContainerTest;
 import reactor.core.publisher.Flux;
@@ -35,7 +38,7 @@ import reactor.core.publisher.Flux;
 @SpringBootTest(properties = "spring.ai.openai.api-key=test")
 class ChatPipelineStubbedTest extends PgVectorContainerTest {
 
-    @Autowired private IngestService ingestService;
+    @Autowired private IngestJobService ingestJobService;
     @Autowired private ChatService chatService;
     @Autowired private DocumentRepository documentRepository;
     @Autowired private RecordingChatModel chatModel;
@@ -51,9 +54,17 @@ class ChatPipelineStubbedTest extends PgVectorContainerTest {
 
     @Test
     void retrievesContextBuildsGroundedPromptAndStreamsAnswer() {
-        ingested =
-                ingestService.ingestText(
+        Document pending =
+                ingestJobService.submitText(
                         "Geography", "The capital of France is Paris. ".repeat(40));
+        await().atMost(Duration.ofSeconds(10))
+                .until(
+                        () ->
+                                documentRepository
+                                        .findById(pending.getId())
+                                        .map(d -> d.getStatus() == DocumentStatus.READY)
+                                        .orElse(false));
+        ingested = documentRepository.findById(pending.getId()).orElseThrow();
 
         List<String> tokens =
                 chatService.answer("What is the capital of France?").collectList().block();

@@ -1,16 +1,22 @@
 package personal.knowledge.base.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-import java.util.ArrayList;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.embedding.Embedding;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -24,13 +30,20 @@ import personal.knowledge.base.repository.DocumentRepository;
 import personal.knowledge.base.support.PgVectorContainerTest;
 
 /**
- * Exercises the full ingest + retrieval pipeline against the real pgvector database using a
- * deterministic stub {@link EmbeddingModel}, so no OpenAI key or network access is required.
+ * Exercises the full background ingest + retrieval pipeline against the real pgvector database
+ * using a deterministic stub {@link EmbeddingModel}, so no OpenAI key or network access is
+ * required. Retry/dispatch timing is sped up via property overrides so retry tests stay fast.
  */
-@SpringBootTest(properties = "spring.ai.openai.api-key=test")
+@SpringBootTest(
+        properties = {
+            "spring.ai.openai.api-key=test",
+            "app.ingest-jobs.retry-initial-delay=200ms",
+            "app.ingest-jobs.retry-max-delay=500ms",
+            "app.ingest-jobs.dispatch-interval=300ms"
+        })
 class IngestPipelineStubbedTest extends PgVectorContainerTest {
 
-    @Autowired private IngestService ingestService;
+    @Autowired private IngestJobService ingestJobService;
     @Autowired private ChunkRepository chunkRepository;
     @Autowired private DocumentRepository documentRepository;
 
@@ -45,13 +58,26 @@ class IngestPipelineStubbedTest extends PgVectorContainerTest {
         additionalDocuments.forEach(document -> documentRepository.deleteById(document.getId()));
     }
 
+    private Document awaitTerminal(UUID documentId) {
+        await().atMost(Duration.ofSeconds(10))
+                .until(
+                        () ->
+                                documentRepository
+                                        .findById(documentId)
+                                        .map(d -> d.getStatus() == DocumentStatus.READY || d.getStatus() == DocumentStatus.ERROR)
+                                        .orElse(false));
+        return documentRepository.findById(documentId).orElseThrow();
+    }
+
     @Test
     void ingestsChunksAndStores1536DimEmbeddings() {
         String text =
                 "Spring AI provides building blocks for retrieval-augmented generation. "
                         .repeat(40);
 
-        ingested = ingestService.ingestText("Stubbed overview", text);
+        Document pending = ingestJobService.submitText("Stubbed overview", text);
+        assertThat(pending.getStatus()).isEqualTo(DocumentStatus.PENDING);
+        ingested = awaitTerminal(pending.getId());
 
         assertThat(ingested.getStatus()).isEqualTo(DocumentStatus.READY);
 
@@ -67,7 +93,8 @@ class IngestPipelineStubbedTest extends PgVectorContainerTest {
     void similaritySearchReturnsTheMatchingChunkFirst() {
         String text =
                 "Vector search retrieves the most relevant passages for a question. ".repeat(40);
-        ingested = ingestService.ingestText("Stubbed retrieval", text);
+        Document pending = ingestJobService.submitText("Stubbed retrieval", text);
+        ingested = awaitTerminal(pending.getId());
 
         List<DocumentChunk> chunks =
                 chunkRepository.findByDocument_IdOrderByChunkIndex(ingested.getId());
@@ -125,8 +152,37 @@ class IngestPipelineStubbedTest extends PgVectorContainerTest {
                 .isEqualTo("Safe failure reason");
     }
 
+    @Test
+    void retriesATransientFailureAndEventuallySucceeds() {
+        String text = StubEmbeddingConfig.TRANSIENT_ONCE_MARKER + " retry me please";
+
+        Document pending = ingestJobService.submitText("Retry once", text);
+        ingested = awaitTerminal(pending.getId());
+
+        assertThat(ingested.getStatus()).isEqualTo(DocumentStatus.READY);
+        assertThat(ingested.getAttemptCount()).isEqualTo(2);
+    }
+
+    @Test
+    void exhaustsRetriesAndEndsInErrorWithNoChunks() {
+        String text = StubEmbeddingConfig.ALWAYS_TRANSIENT_MARKER + " never succeeds";
+
+        Document pending = ingestJobService.submitText("Always fails", text);
+        ingested = awaitTerminal(pending.getId());
+
+        assertThat(ingested.getStatus()).isEqualTo(DocumentStatus.ERROR);
+        assertThat(ingested.getAttemptCount()).isEqualTo(3);
+        assertThat(ingested.getFailureReason()).isNotBlank();
+        assertThat(chunkRepository.findByDocument_IdOrderByChunkIndex(ingested.getId())).isEmpty();
+    }
+
     @TestConfiguration
     static class StubEmbeddingConfig {
+
+        static final String TRANSIENT_ONCE_MARKER = "TRANSIENT_FAILURE_ONCE";
+        static final String ALWAYS_TRANSIENT_MARKER = "TRANSIENT_FAILURE_ALWAYS";
+
+        private static final ConcurrentHashMap<String, AtomicInteger> callCounts = new ConcurrentHashMap<>();
 
         @Bean
         @Primary
@@ -149,6 +205,16 @@ class IngestPipelineStubbedTest extends PgVectorContainerTest {
             @Override
             public EmbeddingResponse call(EmbeddingRequest request) {
                 List<String> inputs = request.getInstructions();
+                for (String input : inputs) {
+                    if (input.contains(ALWAYS_TRANSIENT_MARKER)) {
+                        throw new TransientAiException("stub: always-transient failure");
+                    }
+                    if (input.contains(TRANSIENT_ONCE_MARKER)
+                            && callCounts.computeIfAbsent(input, k -> new AtomicInteger()).incrementAndGet()
+                                    == 1) {
+                        throw new TransientAiException("stub: transient failure on first attempt");
+                    }
+                }
                 List<Embedding> embeddings =
                         java.util.stream.IntStream.range(0, inputs.size())
                                 .mapToObj(
