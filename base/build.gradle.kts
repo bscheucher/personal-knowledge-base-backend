@@ -30,7 +30,7 @@ dependencies {
 	implementation("org.springframework.ai:spring-ai-starter-model-openai")
 	implementation("org.springframework.ai:spring-ai-starter-vector-store-pgvector")
 	implementation("org.hibernate.orm:hibernate-vector:6.6.53.Final")
-	implementation("org.apache.pdfbox:pdfbox:3.0.5")
+	implementation("org.apache.pdfbox:pdfbox:3.0.8")
 	implementation("org.jsoup:jsoup:1.18.3")
 	implementation("org.apache.httpcomponents.client5:httpclient5")
 	compileOnly("org.projectlombok:lombok")
