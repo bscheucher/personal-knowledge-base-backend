@@ -14,6 +14,7 @@ import org.springframework.validation.annotation.Validated;
 @Getter
 @Setter
 public class IngestJobProperties {
+    private boolean dispatcherEnabled = true;
     @Min(1) private int corePoolSize = 2;
     @Min(1) private int maxPoolSize = 4;
     @Min(0) private int queueCapacity = 50;

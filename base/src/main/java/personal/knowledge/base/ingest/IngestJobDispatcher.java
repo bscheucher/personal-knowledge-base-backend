@@ -1,8 +1,10 @@
 package personal.knowledge.base.ingest;
 
+import jakarta.annotation.PreDestroy;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -30,14 +32,28 @@ public class IngestJobDispatcher {
     private final IngestJobProperties properties;
     private final TaskScheduler taskScheduler;
 
+    private ScheduledFuture<?> scheduledTask;
+
     @EventListener(ApplicationReadyEvent.class)
     public void onReady() {
+        if (!properties.isDispatcherEnabled()) {
+            return;
+        }
         int recovered =
                 lifecycleService.recoverInterrupted(properties.getMaxAttempts(), INTERRUPTED_REASON);
         if (recovered > 0) {
             log.warn("Recovered {} document(s) interrupted by a previous shutdown", recovered);
         }
-        taskScheduler.scheduleWithFixedDelay(this::dispatch, properties.getDispatchInterval());
+        scheduledTask =
+                taskScheduler.scheduleWithFixedDelay(
+                        this::dispatch, properties.getDispatchInterval());
+    }
+
+    @PreDestroy
+    void stop() {
+        if (scheduledTask != null) {
+            scheduledTask.cancel(false);
+        }
     }
 
     void dispatch() {

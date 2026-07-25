@@ -3,14 +3,18 @@ package personal.knowledge.base.ingest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ScheduledFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Pageable;
@@ -38,6 +42,37 @@ class IngestJobDispatcherTest {
         verify(lifecycleService).recoverInterrupted(3, IngestJobDispatcher.INTERRUPTED_REASON);
         verify(taskScheduler)
                 .scheduleWithFixedDelay(any(Runnable.class), eq(properties.getDispatchInterval()));
+    }
+
+    @Test
+    void onReadyDoesNothingWhenDispatcherIsDisabled() {
+        properties.setDispatcherEnabled(false);
+
+        dispatcher.onReady();
+
+        verifyNoInteractions(lifecycleService, taskScheduler);
+    }
+
+    @Test
+    void stopCancelsTheScheduledDispatch() {
+        ScheduledFuture<?> scheduledTask = mock(ScheduledFuture.class);
+        doReturn(scheduledTask)
+                .when(taskScheduler)
+                .scheduleWithFixedDelay(
+                        any(Runnable.class), eq(properties.getDispatchInterval()));
+        dispatcher.onReady();
+
+        dispatcher.stop();
+
+        verify(scheduledTask).cancel(false);
+    }
+
+    @Test
+    void stopBeforeSchedulingDoesNothing() {
+        dispatcher.stop();
+
+        verify(taskScheduler, never())
+                .scheduleWithFixedDelay(any(Runnable.class), any(Duration.class));
     }
 
     @Test

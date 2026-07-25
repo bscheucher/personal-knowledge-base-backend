@@ -3,6 +3,7 @@ package personal.knowledge.base.support;
 import org.junit.jupiter.api.Tag;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -10,6 +11,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /** Shared setup for integration tests that need PostgreSQL, pgvector, and Flyway migrations. */
 @Tag("integration")
 @Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class PgVectorContainerTest {
 
     @Container
